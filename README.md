@@ -24,13 +24,13 @@ Bring up the GBBS Suite (refer https://github.com/ParAlg/gbbs#readme)
 
 Create 4 copies of the folder gbbs/benchmarks/Spanner/MPXV15/ namely;
 
-•	gbbs/benchmarks/Spanner/MPVX_Baseline/
+        •	gbbs/benchmarks/Spanner/MPVX_Baseline/
 
-•	gbbs/benchmarks/Spanner/MPVX_CompactSpanner/
+        •	gbbs/benchmarks/Spanner/MPVX_CompactSpanner/
 
-•	gbbs/benchmarks/Spanner/FGV_Baseline/
+        •	gbbs/benchmarks/Spanner/FGV_Baseline/
 
-•	gbbs/benchmarks/Spanner/FGV_CompactSpanner/
+        •	gbbs/benchmarks/Spanner/FGV_CompactSpanner/
 
 
 Replace the files Spanner.h and Spanner.cc in each of these folders with the corresponding files from our repository before compiling each variant. Details for compilation are specified in README of GBBS Suite https://github.com/ParAlg/gbbs#readme
