@@ -8,6 +8,7 @@ Algorithms Can Be Fast and Scalable", presented at Symposium on Parallelism
 in Algorithms and Architectures, 2018. 
 
 GBBS: Graph Based Benchmark Suite - https://github.com/ParAlg/gbbs
+
 Copyright (c) 2018 Laxman Dhulipala, Guy Blelloch, and Julian Shun
 
 **Organization**
@@ -22,6 +23,7 @@ Bring up the GBBS Suite (refer https://github.com/ParAlg/gbbs#readme)
 
 
 Create 4 copies of the folder gbbs/benchmarks/Spanner/MPXV15/ namely;
+
 •	gbbs/benchmarks/Spanner/MPVX_Baseline/
 
 •	gbbs/benchmarks/Spanner/MPVX_CompactSpanner/
