@@ -1,3 +1,14 @@
+//MIT License
+
+//Copyright (c) 2022 Maulein
+
+// This work is adapted from the work done under project "Theoretically Efficient Parallel Graph
+// Algorithms Can Be Fast and Scalable", presented at Symposium on Parallelism
+// in Algorithms and Architectures, 2018. 
+// GBBS: Graph Based Benchmark Suite - https://github.com/ParAlg/gbbs
+// Copyright (c) 2018 Laxman Dhulipala, Guy Blelloch, and Julian Shun
+
+
 // This code is part of the project "Theoretically Efficient Parallel Graph
 // Algorithms Can Be Fast and Scalable", presented at Symposium on Parallelism
 // in Algorithms and Architectures, 2018.
