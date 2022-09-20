@@ -1,6 +1,7 @@
 //MIT License
 
 //Copyright (c) 2022 Maulein
+// This code is part of our work titled “Scalable algorithms for compact low-stretch spanners on real-world graphs"
 
 // This work is adapted from the work done under project "Theoretically Efficient Parallel Graph
 // Algorithms Can Be Fast and Scalable", presented at Symposium on Parallelism
