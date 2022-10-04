@@ -71,6 +71,8 @@ sequence<size_t> generate_shifts_geomcap(size_t n, size_t k) {
    shifts[j] += shifts[j-1];
   return shifts;
 }
+
+
 template <class Graph>
 dyn_arr<uintE> luby_for_centers(Graph& G,uintE k_param)
 {
@@ -321,7 +323,7 @@ dyn_arr<uintE> luby_for_centers(Graph& G,uintE k_param)
 
 template <class Graph, class C>
 sequence<edge> fetch_intercluster_te(Graph& G, C& clusters,
-                                     size_t num_clusters, sequence<uintE> &diam,  sequence<uintE>& level,size_t k_param) {
+                                     size_t num_clusters, sequence<uintE> &diam,  sequence<uintE>& level,sequence<uintE>& clusterType,size_t k_param) {
   using W = typename Graph::weight_type;
   debug(std::cout << "Running fetch edges te" << std::endl;);
   using K = edge;
@@ -366,22 +368,40 @@ sequence<edge> fetch_intercluster_te(Graph& G, C& clusters,
     uintE l_ngh = level[ngh];
     if(c_src!=c_ngh)
     {
-    	if(diam[c_src] + diam[c_ngh] <=2*(k_param-1))
+    	if((diam[c_src] + diam[c_ngh]) <=(2*(k_param-1)))
    	 {
 
     		if (c_src < c_ngh) {
     	  		edge_table.insert(std::make_tuple(std::make_pair(c_src, c_ngh),
                                         std::make_pair(src, ngh)));
-   	 	}
+   		}
 
   	 } 	
   	 else
   	 {
-
+            if(clusterType[c_src] == 0 || clusterType[c_ngh] == 0)
+            {
         	if ((l_src > l_ngh) || ((l_src == l_ngh) && (c_ngh < c_src ) )) {
                 	  edge_table.insert(std::make_tuple(std::make_pair(src, c_ngh),
                                         std::make_pair(src, ngh)));
         	 } 
+    	    }
+            else if(clusterType[c_src] == 1 || clusterType[c_ngh] == 0)
+	    {
+                	  edge_table.insert(std::make_tuple(std::make_pair(src, c_ngh),
+                                        std::make_pair(src, ngh)));
+	    }
+            else if(clusterType[c_src] == 0 || clusterType[c_ngh] == 1)
+	    {                    
+		//Edge from Baseline cluster to Predetermined cluster - not added
+	    }
+            else
+	    {
+    		if (c_src < c_ngh) {
+                	  edge_table.insert(std::make_tuple(std::make_pair(ngh, c_src),
+                                        std::make_pair(ngh, src)));
+	        }
+	    }
   	  }
     }
   };
@@ -451,7 +471,7 @@ sequence<edge> fetch_intercluster(Graph& G, C& clusters, size_t num_clusters) {
 
 template <class Graph>
 sequence<edge> tree_and_intercluster_edges(
-    Graph& G, sequence<cluster_and_parent>& cluster_and_parents, sequence<uintE> &diam,sequence<uintE>& level, size_t k_param) {
+    Graph& G, sequence<cluster_and_parent>& cluster_and_parents, sequence<uintE> &diam,sequence<uintE>& level, sequence<uintE>& clusterType, size_t k_param) {
   size_t n = G.n;
   auto edge_list = gbbs::dyn_arr<edge>(2 * n);
 
@@ -479,7 +499,7 @@ sequence<edge> tree_and_intercluster_edges(
   size_t num_clusters =
       parlay::reduce(cluster_size_seq, parlay::addm<size_t>());
 
-  auto intercluster = fetch_intercluster_te(G, clusters, num_clusters, diam,level,k_param);
+  auto intercluster = fetch_intercluster_te(G, clusters, num_clusters, diam,level,clusterType, k_param);
   debug(std::cout << "num_intercluster edges = " << intercluster.size()
                   << std::endl;);
   edge_list.copyIn(intercluster, intercluster.size());
@@ -514,7 +534,7 @@ struct LDD_Parents_F {
 };
 
 template <class Graph>
-inline sequence<cluster_and_parent> LDD_parents(Graph& G, double beta, sequence<uintE> &diam ,sequence<uintE>& level,
+inline sequence<cluster_and_parent> LDD_parents(Graph& G, double beta, sequence<uintE> &diam ,sequence<uintE>& level,sequence<uintE>& clusterType, 
                                                 size_t k_param, bool permute = true) {
   using W = typename Graph::weight_type;
   size_t n = G.n;
@@ -548,7 +568,9 @@ inline sequence<cluster_and_parent> LDD_parents(Graph& G, double beta, sequence<
   	auto centers1 = luby_for_centers(G,k_param);
 	num_to_add= (size_t)centers1.size;
         centers = sequence<uintE>::from_function(
-        centers1.size, [&](size_t i) { return centers1.A[i]; });
+        centers1.size, [&](size_t i) { 
+                clusterType[centers1.A[i]]=1;
+		return centers1.A[i]; });
     }
     else
 	num_to_add = 0;
@@ -597,11 +619,14 @@ inline sequence<cluster_and_parent> LDD_parents(Graph& G, double beta, sequence<
     vertexSubset next_frontier =
        		edgeMap(G, frontier, ldd_f, -1, sparse_blocked);
 
+    auto flag = sequence<uintE>(n + 1);
+    parallel_for(0, n, 1, [&](size_t i) {
+      flag[i] = 0;
+    });
+
     vertexMap(next_frontier, [&](const uintE u) {
-		//Set Levels for high coverage cluster's vertices as +1 to avoid 
-		//2 edges between high coverage cluster and usual LDD cluster 
 		if(change == 0)
-			level[u] = round_luby + 1 + 1;
+			level[u] = round_luby + 1;
 		else
 	 		level[u] = round+1;
 		
@@ -621,19 +646,17 @@ inline sequence<cluster_and_parent> LDD_parents(Graph& G, double beta, sequence<
 		}
     });
 
-  auto flag = sequence<uintE>(n + 1);
-  parallel_for(0, n, 1, [&](size_t i) {
-    flag[i] = 0;
-    });
-
    auto f = std::move(frontier);
+
    auto find_cluster = [&](uintE v) { flag[clusters[v].cluster] = 1; };
    vertexMap(f, find_cluster);
 
    parallel_for(0, n, 1, [&](size_t i) {
     	if(flag[i])
-		diam[i]++;
+		diam[i] = diam[i] + 1;
    });
+
+
    frontier = std::move(next_frontier);
 
    if(change == 1)	
@@ -644,6 +667,10 @@ inline sequence<cluster_and_parent> LDD_parents(Graph& G, double beta, sequence<
    else
       	round_luby ++ ;
   }
+
+   parallel_for(0, n, 1, [&](size_t i) {
+		diam[i] *= 2;
+   });
   return clusters;
 }
 
@@ -656,16 +683,19 @@ inline sequence<edge> Spanner_impl(Graph& G, double beta, size_t k_param) {
   ldd_t.start();
   uintE n=G.n;
   auto diam = sequence<uintE>(n + 1);
-  parallel_for(0, n, 1, [&](size_t i) {
-    diam[i] = 0;
-    });
   auto level = sequence<uintE>(G.n + 1);
-auto clusters_and_parents = LDD_parents(G, beta, diam, level,k_param,permute);
+  auto clusterType = sequence<uintE>(G.n + 1); // 0: Baseline cluster, 1: Predetermined cluster
+  parallel_for(0, n+1, 1, [&](size_t i) {
+    diam[i] = -1;
+    clusterType[i]=0;
+    level[i] = UINT_E_MAX;
+    });
+auto clusters_and_parents = LDD_parents(G, beta, diam, level,clusterType, k_param,permute);
   ldd_t.stop();
   debug(ldd_t.next("ldd time"););
   timer build_el_t;
   build_el_t.start();
-  auto spanner_edges = tree_and_intercluster_edges(G, clusters_and_parents, diam, level, k_param);
+  auto spanner_edges = tree_and_intercluster_edges(G, clusters_and_parents, diam, level, clusterType, k_param);
   build_el_t.stop();
   debug(build_el_t.next("build spanner edges time"););
 
