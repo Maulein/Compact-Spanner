@@ -1,13 +1,7 @@
 //MIT License
 
 // Copyright (c) 2022 Maulein
-// This code is part of our work titled “Scalable algorithms for compact low-stretch spanners on real-world graphs"
-
-// This work is adapted from the work done under project "Theoretically Efficient Parallel Graph
-// Algorithms Can Be Fast and Scalable", presented at Symposium on Parallelism
-// in Algorithms and Architectures, 2018. 
-// GBBS: Graph Based Benchmark Suite - https://github.com/ParAlg/gbbs
-// Copyright (c) 2018 Laxman Dhulipala, Guy Blelloch, and Julian Shu
+// This code is part of our work titled “Scalable algorithms for compact spanners on real-world graphs"
 
 // This code is part of the project "Theoretically Efficient Parallel Graph
 // Algorithms Can Be Fast and Scalable", presented at Symposium on Parallelism
@@ -54,25 +48,26 @@ struct cluster_and_parent {
       : cluster(_cluster), parent(_parent) {}
 };
 
-sequence<size_t> generate_shifts_geomcap(size_t n, int k) {
-  // Create k levels
-  uintE last_round = k-1;
-  uintE r = k-1;
-  double p = (1 - (1/pow(n,(double)1/k))) ; 
- 
-  auto shifts = sequence<size_t>(last_round + 2);
-  parallel_for(2, last_round+2, kDefaultGranularity, [&](size_t i) { 
- 	shifts[i] = ceil(n*p*pow((1-p),last_round - (i-1)));
-   });
-  shifts[0] = 0;
-  shifts[1] = ceil(n*pow((1-p),r));
-  for(uintE j = 1;j<last_round+2;j++)
-   shifts[j] += shifts[j-1];
-  return shifts;
-}
+template <class W>
+struct BFS_F {
+  uintE* Parents;
+  BFS_F(uintE* _Parents) : Parents(_Parents) {}
+  inline bool update(uintE s, uintE d, W w) {
+    if (Parents[d] == UINT_E_MAX) {
+      Parents[d] = s;
+      return 1;
+    } else {
+      return 0;
+    }
+  }
+  inline bool updateAtomic(uintE s, uintE d, W w) {
+    return (gbbs::atomic_compare_and_swap(&Parents[d], UINT_E_MAX, s));
+  }
+  inline bool cond(uintE d) { return (Parents[d] == UINT_E_MAX); }
+};
 
 template <class Graph>
-dyn_arr<uintE> luby_for_centers(Graph& G,uintE k_param)
+dyn_arr<uintE> HighCov_centers(Graph& G,uintE k_param)
 {
 	size_t n = G.n;
 	auto twoHop = sequence<uintE>(n + 1);
@@ -117,9 +112,10 @@ dyn_arr<uintE> luby_for_centers(Graph& G,uintE k_param)
     propagate_next[i] = twoHop[i];
     });
   uintE remove_hops = 1;  //till remove_hops + 1 distanced neighbours removed
-  auto luby_centers = gbbs::dyn_arr<uintE>(20);
+  auto highcov_centers = gbbs::dyn_arr<uintE>(20);
    uintE iter = 0;
-  while(frontierSize!=0)
+   uintE alpha =10; 
+  while(frontierSize!=0 && iter < alpha)
   {
 		iter++;
                 parallel_for(0, n, 1, [&](size_t i) {
@@ -252,7 +248,7 @@ dyn_arr<uintE> luby_for_centers(Graph& G,uintE k_param)
       	auto candidates = parlay::delayed_seq<uintE>(n+1, candidates_f);
       	auto pred = [&](uintE v) { return (frontier[v] && inMIS[v]); };
       	auto centers = parlay::filter(candidates, pred);
-     	luby_centers.copyIn(centers, centers.size());
+     	highcov_centers.copyIn(centers, centers.size());
 	parallel_for(0, n, 1, [&](size_t i) {
 			frontier[i] = 0;
    	});
@@ -289,14 +285,15 @@ dyn_arr<uintE> luby_for_centers(Graph& G,uintE k_param)
     				   auto vertex = std::get<0>(v_iter.cur());
          			   if (v_iter.has_next()) v_iter.next();
 					ct_u++;
-				   if(active[vertex])          		  
+				   if(frontier[vertex])          		  
 				   	reduced_twoHop[i]+=reduced_degree[vertex];
 			}
 		});
 		if(flag==1)
 			break;	
   }
-  return luby_centers;
+
+  return highcov_centers;
 }
 
 template <class Graph, class C>
@@ -342,7 +339,8 @@ sequence<edge> fetch_intercluster_te(Graph& G, C& clusters,
   auto map_f = [&](const uintE& src, const uintE& ngh, const W& w) {
     uintE c_src = clusters[src];
     uintE c_ngh = clusters[ngh];
-    if(diam[c_src] + diam[c_ngh] <=4)
+    uintE k_param = 2; //MPVX stretch 4
+    if(diam[c_src] + diam[c_ngh] <= 2*k_param)
     {
     	if (c_src < c_ngh) {
     	  	edge_table.insert(std::make_tuple(std::make_pair(c_src, c_ngh),
@@ -457,8 +455,24 @@ sequence<edge> tree_and_intercluster_edges(
   debug(std::cout << "num_intercluster edges = " << intercluster.size()
                   << std::endl;);
   edge_list.copyIn(intercluster, intercluster.size());
+  std::cout << "tree edges "<<tree_edges.size()<<"intercluster "<< intercluster.size()<<"total edges = " << edge_list.size<< std::endl;
   size_t edge_list_size = edge_list.size;
-  std::cout << "total edges = " << edge_list.size<< std::endl;
+  /*size_t m =edge_list_size;
+    using edge1 = gbbs::gbbs_io::Edge<gbbs::empty>;
+    std::vector<edge1> edges;
+    edges.resize(m);
+
+    for (size_t i = 0; i < m; i++) {
+      uint32_t u = edge_list.A[i].first;
+      uint32_t v = edge_list.A[i].second;
+      edges[i].from = u;
+      edges[i].to = v;
+    }
+
+    auto SG{gbbs_io::edge_list_to_symmetric_graph(edges)};
+*/
+  //SpannerCheck(G,SG,1);
+
   return sequence<edge>::from_function(
       edge_list_size, [&](size_t i) { return edge_list.A[i]; });
 }
@@ -504,7 +518,7 @@ inline sequence<cluster_and_parent> LDD_parents(Graph& G, double beta, sequence<
   vertexSubset frontier(n);  // Initially empty
   size_t num_added = 0;
   uintE k_param = 1;
-  uintE round_luby=0;
+  uintE round_highcov=0;
   uintE change =0;
 
   while (num_visited < n) {
@@ -519,9 +533,9 @@ inline sequence<cluster_and_parent> LDD_parents(Graph& G, double beta, sequence<
 			num_to_add = n+1 -num_added;
     	}
     	else
-    	if(round_luby ==0)
+    	if(round_highcov ==0)
     	{	
-  		auto centers1 = luby_for_centers(G,k_param);
+  		auto centers1 = HighCov_centers(G,k_param);
 		num_to_add= (size_t)centers1.size;
   		centers = sequence<uintE>::from_function(
       			centers1.size, [&](size_t i) { return centers1.A[i]; });
@@ -546,7 +560,7 @@ inline sequence<cluster_and_parent> LDD_parents(Graph& G, double beta, sequence<
      	  	else
      			return static_cast<uintE>(num_added + i);
 	}
-        else if (round_luby == 0)
+        else if (round_highcov == 0)
 		return centers[i];
       };
 
@@ -558,17 +572,30 @@ inline sequence<cluster_and_parent> LDD_parents(Graph& G, double beta, sequence<
         uintE v = new_centers[i];
         clusters[new_centers[i]] = cluster_and_parent(v, v);
       });
-      if(round_luby ==0)
+      if(round_highcov ==0)
 		num_to_add =0;
 
       num_added += num_to_add;
     }
-
     num_visited += frontier.size();
     if (num_visited >= n) 
 	break;
-    if(change==0 && round_luby==2*k_param)
+    if(change==0 && round_highcov==2*k_param)
 		frontier = std::move(0);
+    
+/*	if(change && round == 0)
+	{
+		
+	parallel_for(0, n, 1, [&](size_t i) 
+	{
+			if(clusters[i].cluster == UINT_E_MAX)
+			{
+				clusters[i]=cluster_and_parent(i,i);
+			}
+	});
+        num_visited = n;
+	}
+*/
     auto ldd_f = LDD_Parents_F<W>(clusters.begin());
     vertexSubset next_frontier =
         edgeMap(G, frontier, ldd_f, -1, sparse_blocked);
@@ -584,18 +611,24 @@ inline sequence<cluster_and_parent> LDD_parents(Graph& G, double beta, sequence<
 
     parallel_for(0, n, 1, [&](size_t i) {
     	if(flag[i])
-		diam[i]++;
+		diam[i] += 1;
     });
     frontier = std::move(next_frontier);
-
+  //  printf("bfs added %d to next frontier\n",frontier.size());
     if(change == 1)	
     	round++;
     else
-    if(round_luby==(2*k_param +1))
+    if(round_highcov==(2*k_param +1))
 	change =1;
     else
-      	round_luby ++ ;
+      	round_highcov ++ ;
   }
+
+
+    parallel_for(0, n, 1, [&](size_t i) {
+		diam[i] *= 2;
+    });
+
   return clusters;
 }
 
@@ -609,7 +642,7 @@ inline sequence<edge> Spanner_impl(Graph& G, double beta) {
   uintE n=G.n;
   auto diam = sequence<uintE>(n + 1);
   parallel_for(0, n, 1, [&](size_t i) {
-    diam[i] = 0;
+    diam[i] = -1;
     });
   auto clusters_and_parents = LDD_parents(G, beta, diam, permute);
   ldd_t.stop();
