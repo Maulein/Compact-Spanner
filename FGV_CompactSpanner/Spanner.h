@@ -1,13 +1,7 @@
 //MIT License
 
 // Copyright (c) 2022 Maulein
-// This code is part of our work titled “Scalable algorithms for compact low-stretch spanners on real-world graphs"
-
-// This work is adapted from the work done under project "Theoretically Efficient Parallel Graph
-// Algorithms Can Be Fast and Scalable", presented at Symposium on Parallelism
-// in Algorithms and Architectures, 2018. 
-// GBBS: Graph Based Benchmark Suite - https://github.com/ParAlg/gbbs
-// Copyright (c) 2018 Laxman Dhulipala, Guy Blelloch, and Julian Shu
+// This code is part of our work titled “Scalable algorithms for compact spanners on real-world graphs"
 
 // This code is part of the project "Theoretically Efficient Parallel Graph
 // Algorithms Can Be Fast and Scalable", presented at Symposium on Parallelism
@@ -74,7 +68,7 @@ sequence<size_t> generate_shifts_geomcap(size_t n, size_t k) {
 
 
 template <class Graph>
-dyn_arr<uintE> luby_for_centers(Graph& G,uintE k_param)
+dyn_arr<uintE> HighCov_for_centers(Graph& G,uintE k_param)
 {
 	size_t n = G.n;
 	auto twoHop = sequence<uintE>(n + 1);
@@ -126,13 +120,14 @@ dyn_arr<uintE> luby_for_centers(Graph& G,uintE k_param)
     });
   
   uintE remove_hops = k_param-2;  //till remove_hops + 1 distanced neighbours removed
-  auto luby_centers = gbbs::dyn_arr<uintE>(20);
-   uintE iter = 0;
-  while(frontierSize!=0)
+  auto highcov_centers = gbbs::dyn_arr<uintE>(20);
+  uintE iter = 0;
+  uintE alpha=10; 
+  while(frontierSize!=0 && iter < alpha)
   {
 		iter++;
                 parallel_for(0, n, 1, [&](size_t i) {
-			if(reduced_twoHop[i] == 0)
+			if(frontier[i] && reduced_twoHop[i] == 0)
 				active[i] = 0;
 			if(active[i])
 				inMIS[i] = 1;
@@ -151,7 +146,7 @@ dyn_arr<uintE> luby_for_centers(Graph& G,uintE k_param)
     			   auto vertex = std::get<0>(v_iter.cur());
           		   if (v_iter.has_next()) v_iter.next();
 			        ct_u++;          		  
-			   if(active[vertex])
+			   if(frontier[vertex])
 			   {
 				if((propagate[i]<reduced_twoHop[vertex]) ||((propagate[i] == reduced_twoHop[vertex]) && (i>vertex )))
 				{
@@ -207,7 +202,7 @@ dyn_arr<uintE> luby_for_centers(Graph& G,uintE k_param)
 		});
 
   		parallel_for(0, n, 1, [&](size_t i) {
-		if(active[i])
+		if(frontier[i])
 		{
   			uintE deg_u = G.get_vertex(i).out_degree();
 			uintE max =0;	
@@ -232,7 +227,7 @@ dyn_arr<uintE> luby_for_centers(Graph& G,uintE k_param)
 
   			parallel_for(0, n, 1, [&](size_t i) {
 				{
-					if(active[i])
+					if(frontier[i])
 					{
   						uintE deg_u = G.get_vertex(i).out_degree();	
 		      				auto v_iter = G.get_vertex(i).out_neighbors().get_iter();
@@ -265,9 +260,9 @@ dyn_arr<uintE> luby_for_centers(Graph& G,uintE k_param)
       auto candidates = parlay::delayed_seq<uintE>(n+1, candidates_f);
       auto pred = [&](uintE v) { return (frontier[v] && inMIS[v]); };
       auto centers = parlay::filter(candidates, pred);
+      
 
-
-      luby_centers.copyIn(centers, centers.size());
+      highcov_centers.copyIn(centers, centers.size());
                 parallel_for(0, n, 1, [&](size_t i) {
 			frontier[i] = 0;
 		});
@@ -310,7 +305,7 @@ dyn_arr<uintE> luby_for_centers(Graph& G,uintE k_param)
 				   auto vertex = std::get<0>(v_iter.cur());
        				   if (v_iter.has_next()) v_iter.next();
 					   ct_u++;
-					   if(active[vertex])          		  
+					   if(frontier[vertex])          		  
 					   	reduced_twoHop[i]+=reduced_degree[vertex];
 			}
 		}
@@ -318,7 +313,7 @@ dyn_arr<uintE> luby_for_centers(Graph& G,uintE k_param)
 	if(flag==1)
 		break;	
   }
-  return luby_centers;
+  return highcov_centers;
 }
 
 template <class Graph, class C>
@@ -379,7 +374,7 @@ sequence<edge> fetch_intercluster_te(Graph& G, C& clusters,
   	 } 	
   	 else
   	 {
-            if(clusterType[c_src] == 0 || clusterType[c_ngh] == 0)
+            if(clusterType[c_src] == 0 && clusterType[c_ngh] == 0)
             {
         	if ((l_src > l_ngh) || ((l_src == l_ngh) && (c_ngh < c_src ) )) {
                 	  edge_table.insert(std::make_tuple(std::make_pair(src, c_ngh),
@@ -549,7 +544,7 @@ inline sequence<cluster_and_parent> LDD_parents(Graph& G, double beta, sequence<
   size_t round = 0, num_visited = 0;
   vertexSubset frontier(n);  // Initially empty
   size_t num_added = 0;
-  uintE round_luby=0;
+  uintE round_highcov=0;
   uintE change =0;
   while (num_visited < n) {
     sequence<uintE> centers;
@@ -563,9 +558,9 @@ inline sequence<cluster_and_parent> LDD_parents(Graph& G, double beta, sequence<
 	num_to_add = n+1 -num_added;
     }
     else
-    if(round_luby ==0)
+    if(round_highcov ==0)
     {	
-  	auto centers1 = luby_for_centers(G,k_param);
+  	auto centers1 = HighCov_for_centers(G,k_param);
 	num_to_add= (size_t)centers1.size;
         centers = sequence<uintE>::from_function(
         centers1.size, [&](size_t i) { 
@@ -590,7 +585,7 @@ inline sequence<cluster_and_parent> LDD_parents(Graph& G, double beta, sequence<
      	  	else
      			return static_cast<uintE>(num_added + i);
 	}
-        else if (round_luby == 0)
+        else if (round_highcov == 0)
 			return centers[i];
       };
 
@@ -604,7 +599,7 @@ inline sequence<cluster_and_parent> LDD_parents(Graph& G, double beta, sequence<
 
         level[new_centers[i]]=round;   //ADDED
       });
-	if(round_luby ==0)
+	if(round_highcov ==0)
 		num_to_add =0;
 
       num_added += num_to_add;
@@ -613,7 +608,7 @@ inline sequence<cluster_and_parent> LDD_parents(Graph& G, double beta, sequence<
     num_visited += frontier.size();
     if (num_visited >= n) 
 		break;
-    if(change==0 && round_luby == k_param-1)
+   if(change==0 && round_highcov == k_param-1)
 		frontier = std::move(0);
     auto ldd_f = LDD_Parents_F<W>(clusters.begin());
     vertexSubset next_frontier =
@@ -626,7 +621,7 @@ inline sequence<cluster_and_parent> LDD_parents(Graph& G, double beta, sequence<
 
     vertexMap(next_frontier, [&](const uintE u) {
 		if(change == 0)
-			level[u] = round_luby + 1;
+			level[u] = round_highcov + 1;
 		else
 	 		level[u] = round+1;
 		
@@ -662,10 +657,10 @@ inline sequence<cluster_and_parent> LDD_parents(Graph& G, double beta, sequence<
    if(change == 1)	
     	round++;
    else
-   if(round_luby==(k_param))
+   if(round_highcov==(k_param))
 	change =1;
    else
-      	round_luby ++ ;
+      	round_highcov ++ ;
   }
 
    parallel_for(0, n, 1, [&](size_t i) {
